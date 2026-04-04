@@ -1,21 +1,58 @@
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 
+# =========================================================
+# PATHS
+# =========================================================
 DATA_DIR = Path.home() / "Documents" / "NBA1980s" / "NBA 1980's Data" / "1980's_CleanedData"
+OUTPUT_DIR = Path.home() / "Documents" / "NBA1980s" / "NBA1980's_BasicAnalysisPython"
 
 SEASONS = [
     "1980-1981", "1981-1982", "1982-1983", "1983-1984", "1984-1985",
     "1985-1986", "1986-1987", "1987-1988", "1988-1989", "1989-1990"
 ]
 
-TOP_N = 20
+TOP_N_TABLE = 20
+TOP_N_PLOT = 15
+TOP_N_DECADE = 20
 MIN_GAMES = 20
 MIN_MINUTES_PER_GAME = 15
 
-# -----------------------------
-# Helpers
-# -----------------------------
+# Folders for the 6 advanced stat plots
+PLOT_FOLDERS = {
+    "VORP": OUTPUT_DIR / "Top15VORP",
+    "BPM": OUTPUT_DIR / "Top15BPM",
+    "PER": OUTPUT_DIR / "Top15PER",
+    "DWS": OUTPUT_DIR / "Top15DWS",
+    "OWS": OUTPUT_DIR / "Top15OWS",
+    "WS": OUTPUT_DIR / "Top15WS",
+}
+
+CORR_DIR = OUTPUT_DIR / "CorrelationMatrix"
+
+# Advanced stats to rank/plot
+ADVANCED_STATS = ["VORP", "BPM", "PER", "DWS", "OWS", "WS"]
+
+# Totals stats to rank if present
+TOTALS_STATS = [
+    "PTS", "TRB", "AST", "STL", "BLK", "TOV", "MP",
+    "FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB"
+]
+
+# =========================================================
+# SETUP OUTPUT FOLDERS
+# =========================================================
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+CORR_DIR.mkdir(parents=True, exist_ok=True)
+
+for folder in PLOT_FOLDERS.values():
+    folder.mkdir(parents=True, exist_ok=True)
+
+# =========================================================
+# HELPERS
+# =========================================================
 def clean_names_simple(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(col).strip() for col in df.columns]
@@ -31,24 +68,45 @@ def safe_read_sheet(file_path: Path, sheet_name: str) -> pd.DataFrame | None:
         return None
 
 
-def prepare_one_season(season: str) -> pd.DataFrame | None:
+def to_numeric_if_present(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    df = df.copy()
+    for col in cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def get_merge_keys(left_df: pd.DataFrame, right_df: pd.DataFrame) -> list[str]:
+    possible = ["Player", "Tm", "Season"]
+    return [col for col in possible if col in left_df.columns and col in right_df.columns]
+
+
+def filter_by_games_and_minutes(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if "G" in df.columns and "MP" in df.columns:
+        df = df[(df["G"] >= MIN_GAMES) & (df["MP"] >= MIN_MINUTES_PER_GAME)]
+    return df
+
+
+def prepare_one_season(season: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
     file_path = DATA_DIR / f"Cleansed_NBA_{season}.xlsx"
 
     if not file_path.exists():
         print(f"File not found: {file_path}")
-        return None
+        return None, None
 
     per_game = safe_read_sheet(file_path, "PerGame")
-    totals = safe_read_sheet(file_path, "Totals")   # kept here to match your structure
+    totals = safe_read_sheet(file_path, "Totals")
     advanced = safe_read_sheet(file_path, "Advanced")
 
     if per_game is None or totals is None or advanced is None:
-        return None
+        return None, None
 
     per_game = clean_names_simple(per_game)
     totals = clean_names_simple(totals)
     advanced = clean_names_simple(advanced)
 
+    # Keep only needed columns from PerGame and Advanced
     per_game_keep = [
         "Player", "Pos", "Age", "Tm", "G", "MP", "PTS", "TRB", "AST",
         "STL", "BLK", "TOV", "FG%", "3P%", "2P%", "eFG%", "FT%", "Season"
@@ -62,37 +120,35 @@ def prepare_one_season(season: str) -> pd.DataFrame | None:
     per_game = per_game[[col for col in per_game_keep if col in per_game.columns]]
     advanced = advanced[[col for col in advanced_keep if col in advanced.columns]]
 
-    # Merge like your R script:
-    # left_join(advanced %>% select(-Pos, -Age, -G, -MP), by = c("Player", "Tm", "Season"))
     adv_drop_cols = [col for col in ["Pos", "Age", "G", "MP"] if col in advanced.columns]
     advanced_for_merge = advanced.drop(columns=adv_drop_cols)
 
-    merge_keys = [col for col in ["Player", "Tm", "Season"] if col in per_game.columns and col in advanced_for_merge.columns]
+    merge_keys = get_merge_keys(per_game, advanced_for_merge)
     if len(merge_keys) < 2:
         print(f"Not enough merge keys found for {season}. Available keys: {merge_keys}")
-        return None
+        return None, None
 
     merged = per_game.merge(advanced_for_merge, how="left", on=merge_keys)
 
-    numeric_cols = [
+    numeric_cols_merged = [
         "Age", "G", "MP", "PTS", "TRB", "AST", "STL", "BLK", "TOV",
         "FG%", "3P%", "2P%", "eFG%", "FT%",
         "PER", "TS%", "USG%", "OWS", "DWS", "WS", "WS/48",
         "OBPM", "DBPM", "BPM", "VORP"
     ]
 
-    for col in numeric_cols:
-        if col in merged.columns:
-            merged[col] = pd.to_numeric(merged[col], errors="coerce")
+    merged = to_numeric_if_present(merged, numeric_cols_merged)
+    merged = filter_by_games_and_minutes(merged)
 
-    # NOTE:
-    # In your R script, MP is filtered as MP >= min_minutes_per_game.
-    # If MP is total minutes instead of minutes-per-game, this is very lenient.
-    # I'm keeping it exactly as written for now.
-    if "G" in merged.columns and "MP" in merged.columns:
-        merged = merged[(merged["G"] >= MIN_GAMES) & (merged["MP"] >= MIN_MINUTES_PER_GAME)]
+    # Prepare totals separately and apply the same filter if possible
+    totals_numeric_cols = [
+        "Age", "G", "MP", "PTS", "TRB", "AST", "STL", "BLK", "TOV",
+        "FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB"
+    ]
+    totals = to_numeric_if_present(totals, totals_numeric_cols)
+    totals = filter_by_games_and_minutes(totals)
 
-    return merged
+    return merged, totals
 
 
 def get_top_metric(df: pd.DataFrame, metric: str, n: int = 20) -> pd.DataFrame | None:
@@ -110,13 +166,12 @@ def get_top_metric(df: pd.DataFrame, metric: str, n: int = 20) -> pd.DataFrame |
     return top_df
 
 
-def plot_top_metric(df: pd.DataFrame, metric: str, season_label: str, top_n: int = 15, save_dir: Path | None = None):
+def plot_top_metric(df: pd.DataFrame, metric: str, season_label: str, top_n: int = 15):
     if metric not in df.columns:
         return
 
-    keep_cols = [col for col in ["Player", "Tm", metric] if col in df.columns]
     top_df = (
-        df[keep_cols]
+        df[[col for col in ["Player", "Tm", metric] if col in df.columns]]
         .dropna(subset=[metric])
         .sort_values(by=metric, ascending=False)
         .head(top_n)
@@ -127,7 +182,7 @@ def plot_top_metric(df: pd.DataFrame, metric: str, season_label: str, top_n: int
         return
 
     top_df["Label"] = top_df["Player"] + " (" + top_df["Tm"] + ")"
-    top_df = top_df.iloc[::-1]  # reverse for horizontal bar chart
+    top_df = top_df.iloc[::-1]
 
     plt.figure(figsize=(10, 7))
     plt.barh(top_df["Label"], top_df[metric])
@@ -136,17 +191,195 @@ def plot_top_metric(df: pd.DataFrame, metric: str, season_label: str, top_n: int
     plt.ylabel("")
     plt.tight_layout()
 
-    if save_dir is not None:
-        save_dir.mkdir(parents=True, exist_ok=True)
-        safe_metric = metric.replace("/", "_").replace("%", "pct")
-        plt.savefig(save_dir / f"{season_label}_{safe_metric}.png", dpi=300, bbox_inches="tight")
-
-    plt.show()
+    out_path = PLOT_FOLDERS[metric] / f"{season_label}_{metric}_top{top_n}.png"
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
 
 
-# -----------------------------
-# Analyze each season separately
-# -----------------------------
+def save_correlation_outputs(df: pd.DataFrame, season_label: str):
+    corr_cols = [
+        "PTS", "TRB", "AST", "STL", "BLK", "PER", "TS%", "USG%",
+        "OWS", "DWS", "WS", "WS/48", "OBPM", "DBPM", "BPM", "VORP"
+    ]
+    corr_cols = [col for col in corr_cols if col in df.columns]
+
+    if len(corr_cols) <= 1:
+        return
+
+    corr_matrix = df[corr_cols].corr()
+
+    csv_path = CORR_DIR / f"corr_matrix_{season_label.replace('-', '_')}.csv"
+    corr_matrix.to_csv(csv_path, index=True)
+
+    plt.figure(figsize=(12, 10))
+    im = plt.imshow(corr_matrix, aspect="auto")
+    plt.colorbar(im)
+    plt.xticks(range(len(corr_cols)), corr_cols, rotation=90)
+    plt.yticks(range(len(corr_cols)), corr_cols)
+    plt.title(f"Correlation Matrix - {season_label}")
+    plt.tight_layout()
+
+    img_path = CORR_DIR / f"corr_matrix_{season_label.replace('-', '_')}.png"
+    plt.savefig(img_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def save_filtered_dataset(df: pd.DataFrame, season_label: str):
+    out_path = OUTPUT_DIR / f"season_data_{season_label.replace('-', '_')}.csv"
+    df.to_csv(out_path, index=False)
+
+
+def save_advanced_top20_tables(df: pd.DataFrame, season_label: str):
+    for metric in ADVANCED_STATS:
+        top_df = get_top_metric(df, metric, TOP_N_TABLE)
+        if top_df is not None and not top_df.empty:
+            out_path = OUTPUT_DIR / f"top20_{metric}_{season_label.replace('-', '_')}.csv"
+            top_df.to_csv(out_path, index=False)
+
+
+def save_totals_top20_tables(totals_df: pd.DataFrame, season_label: str):
+    if totals_df is None or totals_df.empty:
+        return
+
+    for stat in TOTALS_STATS:
+        if stat not in totals_df.columns:
+            continue
+
+        keep_cols = [col for col in ["Player", "Tm", stat] if col in totals_df.columns]
+        top_df = (
+            totals_df[keep_cols]
+            .dropna(subset=[stat])
+            .sort_values(by=stat, ascending=False)
+            .head(TOP_N_TABLE)
+            .reset_index(drop=True)
+        )
+
+        if not top_df.empty:
+            out_path = OUTPUT_DIR / f"top20_totals_{stat}_{season_label.replace('-', '_')}.csv"
+            top_df.to_csv(out_path, index=False)
+
+
+def save_decade_summary_graph(metric: str, season_results: dict[str, pd.DataFrame]):
+    rows = []
+
+    for season, df in season_results.items():
+        if metric not in df.columns:
+            continue
+
+        top_vals = (
+            df[[metric]]
+            .dropna()
+            .sort_values(by=metric, ascending=False)
+            .head(TOP_N_PLOT)[metric]
+            .tolist()
+        )
+
+        if len(top_vals) == 0:
+            continue
+
+        rows.append({
+            "Season": season,
+            "Top15Mean": float(np.mean(top_vals)),
+            "Top15Max": float(np.max(top_vals)),
+            "Top15Min": float(np.min(top_vals)),
+            "Top15Median": float(np.median(top_vals))
+        })
+
+    if not rows:
+        return
+
+    decade_df = pd.DataFrame(rows).sort_values("Season").reset_index(drop=True)
+
+    decade_csv_path = PLOT_FOLDERS[metric] / f"decade_summary_{metric}.csv"
+    decade_df.to_csv(decade_csv_path, index=False)
+
+    x = np.arange(len(decade_df))
+    seasons = decade_df["Season"].tolist()
+
+    plt.figure(figsize=(12, 7))
+    plt.plot(x, decade_df["Top15Mean"], marker="o", label="Top 15 Mean")
+    plt.plot(x, decade_df["Top15Median"], marker="s", label="Top 15 Median")
+    plt.plot(x, decade_df["Top15Max"], linestyle="--", label="Top 15 Max")
+    plt.plot(x, decade_df["Top15Min"], linestyle="--", label="Top 15 Min")
+    plt.fill_between(x, decade_df["Top15Min"], decade_df["Top15Max"], alpha=0.2)
+
+    plt.xticks(x, seasons, rotation=45, ha="right")
+    plt.title(f"Decade Elite Trend for {metric} (Top 15 Each Season)")
+    plt.xlabel("Season")
+    plt.ylabel(metric)
+    plt.legend()
+    plt.tight_layout()
+
+    out_path = PLOT_FOLDERS[metric] / f"decade_elite_trend_{metric}.png"
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def save_true_decade_leaderboard(metric: str, season_results: dict[str, pd.DataFrame]):
+    """
+    True decade leaderboard:
+    Best individual player-seasons across the whole 1980s for a given metric.
+    Saves:
+      - CSV of top 20 player-seasons for the decade
+      - horizontal bar chart of those top 20 seasons
+    """
+    frames = []
+
+    for season, df in season_results.items():
+        if metric not in df.columns:
+            continue
+
+        temp = df.copy()
+        temp["SeasonLabel"] = season
+
+        keep_cols = [col for col in ["Player", "Tm", metric, "SeasonLabel"] if col in temp.columns]
+        temp = temp[keep_cols].dropna(subset=[metric])
+
+        frames.append(temp)
+
+    if not frames:
+        return
+
+    decade_all = pd.concat(frames, ignore_index=True)
+
+    # Keep top 20 player-seasons across full decade
+    top_decade = (
+        decade_all.sort_values(by=metric, ascending=False)
+        .head(TOP_N_DECADE)
+        .reset_index(drop=True)
+    )
+
+    # Save CSV
+    csv_path = PLOT_FOLDERS[metric] / f"decade_top{TOP_N_DECADE}_{metric}_player_seasons.csv"
+    top_decade.to_csv(csv_path, index=False)
+
+    # Make labels like "Larry Bird (BOS, 1985-1986)"
+    top_decade["Label"] = (
+        top_decade["Player"]
+        + " ("
+        + top_decade["Tm"]
+        + ", "
+        + top_decade["SeasonLabel"]
+        + ")"
+    )
+
+    plot_df = top_decade.iloc[::-1]
+
+    plt.figure(figsize=(12, 9))
+    plt.barh(plot_df["Label"], plot_df[metric])
+    plt.title(f"Top {TOP_N_DECADE} {metric} Player-Seasons of the 1980s")
+    plt.xlabel(metric)
+    plt.ylabel("")
+    plt.tight_layout()
+
+    img_path = PLOT_FOLDERS[metric] / f"decade_top{TOP_N_DECADE}_{metric}_player_seasons.png"
+    plt.savefig(img_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+# =========================================================
+# MAIN ANALYSIS
+# =========================================================
 season_results = {}
 
 for season in SEASONS:
@@ -154,82 +387,42 @@ for season in SEASONS:
     print(f"Analyzing season: {season}")
     print("=============================")
 
-    season_df = prepare_one_season(season)
+    season_df, totals_df = prepare_one_season(season)
 
     if season_df is None or season_df.empty:
-        print(f"No usable data for {season}")
+        print(f"No usable merged data for {season}")
         continue
 
     season_results[season] = season_df
 
-    print(f"\nRows loaded: {len(season_df)}")
+    print(f"\nRows loaded after filters: {len(season_df)}")
     print("\nColumns:")
     print(list(season_df.columns))
 
-    # Top players by metric for this season
-    top_ws = get_top_metric(season_df, "WS", TOP_N)
-    top_bpm = get_top_metric(season_df, "BPM", TOP_N)
-    top_vorp = get_top_metric(season_df, "VORP", TOP_N)
-    top_per = get_top_metric(season_df, "PER", TOP_N)
-    top_ows = get_top_metric(season_df, "OWS", TOP_N)
-    top_dws = get_top_metric(season_df, "DWS", TOP_N)
+    # Save full filtered dataset
+    save_filtered_dataset(season_df, season)
 
-    print("\n=== Top Win Shares ===")
-    print(top_ws)
+    # Save advanced top 20 tables into root output folder
+    save_advanced_top20_tables(season_df, season)
 
-    print("\n=== Top BPM ===")
-    print(top_bpm)
+    # Save totals top 20 tables into root output folder
+    if totals_df is not None and not totals_df.empty:
+        save_totals_top20_tables(totals_df, season)
 
-    print("\n=== Top VORP ===")
-    print(top_vorp)
+    # Save all 6 top-15 graphs into their own folders
+    for metric in ADVANCED_STATS:
+        plot_top_metric(season_df, metric, season, TOP_N_PLOT)
 
-    print("\n=== Top PER ===")
-    print(top_per)
-
-    print("\n=== Top Offensive Win Shares ===")
-    print(top_ows)
-
-    print("\n=== Top Defensive Win Shares ===")
-    print(top_dws)
-
-    # Correlation matrix for this season
-    corr_cols = [
-        "PTS", "TRB", "AST", "STL", "BLK", "PER", "TS%", "USG%",
-        "OWS", "DWS", "WS", "WS/48", "OBPM", "DBPM", "BPM", "VORP"
-    ]
-    corr_cols = [col for col in corr_cols if col in season_df.columns]
-
-    if len(corr_cols) > 1:
-        print("\n=== Correlation Matrix ===")
-        corr_matrix = season_df[corr_cols].corr()
-        print(corr_matrix.round(2))
-
-        season_tag = season.replace("-", "_")
-        corr_matrix.to_csv(DATA_DIR / f"corr_matrix_{season_tag}.csv", index=True)
-
-    # Save CSVs for this season
-    season_tag = season.replace("-", "_")
-
-    season_df.to_csv(DATA_DIR / f"season_data_{season_tag}.csv", index=False)
-
-    if top_ws is not None:
-        top_ws.to_csv(DATA_DIR / f"top_ws_{season_tag}.csv", index=False)
-    if top_bpm is not None:
-        top_bpm.to_csv(DATA_DIR / f"top_bpm_{season_tag}.csv", index=False)
-    if top_vorp is not None:
-        top_vorp.to_csv(DATA_DIR / f"top_vorp_{season_tag}.csv", index=False)
-    if top_per is not None:
-        top_per.to_csv(DATA_DIR / f"top_per_{season_tag}.csv", index=False)
-    if top_ows is not None:
-        top_ows.to_csv(DATA_DIR / f"top_ows_{season_tag}.csv", index=False)
-    if top_dws is not None:
-        top_dws.to_csv(DATA_DIR / f"top_dws_{season_tag}.csv", index=False)
-
-    # Plots for this season
-    plots_dir = DATA_DIR / "plots"
-    plot_top_metric(season_df, "WS", season, 15, plots_dir)
-    plot_top_metric(season_df, "BPM", season, 15, plots_dir)
-    plot_top_metric(season_df, "VORP", season, 15, plots_dir)
-    plot_top_metric(season_df, "PER", season, 15, plots_dir)
+    # Save correlation matrix CSV + image
+    save_correlation_outputs(season_df, season)
 
 print("\nFinished seasonal analysis.")
+
+# =========================================================
+# DECADE SUMMARY GRAPHS + TRUE DECADE LEADERBOARDS
+# =========================================================
+for metric in ADVANCED_STATS:
+    save_decade_summary_graph(metric, season_results)
+    save_true_decade_leaderboard(metric, season_results)
+
+print("\nFinished decade summary graphs and true decade leaderboards.")
