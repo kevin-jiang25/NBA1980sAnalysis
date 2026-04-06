@@ -1,25 +1,50 @@
 import pandas as pd
-import numpy as np
-from openpyxl import load_workbook
+import os
 
-"""
-Goals:
-1. Calculate the team total PTS. As well as AST/REB(ORB/DRB?)/BLK/STL/MINs played
+def add_team_centrality(df, team_col="Tm", stats=None, keep_team_totals=False):
+    df_out = df.copy()
 
-2. 
+    if stats is None:
+        stats = ["PTS", "AST", "ORB", "DRB", "STL", "BLK", "MP"]
 
-3. For each player, add the player share calc
-"""
+    """
+    If a player's team is "TOT" the column is ignored. "TOT" is when a player is on multiple teams. Their combined
+    stats are listed. Not needed for our work.
+    """
+    df_out = df_out[df_out[team_col] != "TOT"]
 
-file = "NBA 1980's Data/1980's_CleanedData/Cleansed_NBA_1980-1981.xlsx"
+    for stat in stats:
+        team_total_col = f"{stat}_team"
+        share_col = f"{stat}_share"
 
-df = pd.read_excel(file, sheet_name="Totals")
+        df_out[team_total_col] = df_out.groupby(team_col)[stat].transform("sum")
+        df_out[share_col] = df_out[stat] / df_out[team_total_col]
 
-df_test = df.copy()
+    """
+    Removes the Team Total PTS/AST/ORB/DRB/STL/BLK/MP from the df. Can set the flag to True
+    in function declaration if needed. 
+    
+    (Logic behind MP might be a little sketch)
+    """
+    if not keep_team_totals:
+        df_out.drop(columns=[f"{stat}_team" for stat in stats], inplace=True)
 
-df_test['PTS_team'] = df_test.groupby("Tm")["PTS"].transform("sum")
+    return df_out
 
-df_test['PTS_team']
+data_directory = "NBA 1980's Data/1980's_CleanedData"
 
-team_pts_df = df_test.groupby("Tm", as_index=False)["PTS"].sum(.sort_values(by="PTS", ascending=False))
-team_pts_df
+for file in os.listdir(data_directory):
+    if file.startswith("~$"):
+        continue
+    if not file.startswith("Cleansed_NBA_") or not file.endswith(".xlsx"):
+        continue
+
+    file_path = os.path.join(data_directory, file)
+    print(f"Processing {file}")
+
+    df = pd.read_excel(file_path, sheet_name="Totals")
+
+    df_out = add_team_centrality(df)
+
+    output_file = os.path.join(data_directory, f"{file.split(".xlsx")[0]}_with_centrality.xlsx")
+    df_out.to_excel(output_file, index=False)
