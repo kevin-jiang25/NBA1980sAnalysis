@@ -31,20 +31,51 @@ def add_team_centrality(df, team_col="Tm", stats=None, keep_team_totals=False):
 
     return df_out
 
-data_directory = "NBA 1980's Data/1980's_CleanedData"
+# data_directory = "NBA 1980's Data/1980's_CleanedData"
 
-for file in os.listdir(data_directory):
-    if file.startswith("~$"):
+# for file in os.listdir(data_directory):
+#     if file.startswith("~$"):
+#         continue
+#     if not file.startswith("Cleansed_NBA_") or not file.endswith(".xlsx"):
+#         continue
+
+#     file_path = os.path.join(data_directory, file)
+#     print(f"Processing {file}")
+
+#     df = pd.read_excel(file_path, sheet_name="Totals")
+
+#     df_out = add_team_centrality(df)
+
+#     output_file = os.path.join(data_directory, f"{file.split(".xlsx")[0]}_with_centrality.xlsx")
+#     df_out.to_excel(output_file, index=False)
+
+data_dir = "NBA 1980's Data/1980's_CleanedData"
+
+for filename in os.listdir(data_dir):
+    if (
+        filename.startswith("~$")
+        or not filename.startswith("Cleansed_NBA_")
+        or not filename.endswith(".xlsx")
+        or "with_centrality" in filename
+    ):
         continue
-    if not file.startswith("Cleansed_NBA_") or not file.endswith(".xlsx"):
-        continue
 
-    file_path = os.path.join(data_directory, file)
-    print(f"Processing {file}")
+    file_path = os.path.join(data_dir, filename)
+    print(f"Processing {filename}")
 
-    df = pd.read_excel(file_path, sheet_name="Totals")
+    sheets = pd.read_excel(file_path, sheet_name=None)
 
-    df_out = add_team_centrality(df)
+    # update totals
+    sheets["Totals"] = add_team_centrality(sheets["Totals"])
 
-    output_file = os.path.join(data_directory, f"{file.split(".xlsx")[0]}_with_centrality.xlsx")
-    df_out.to_excel(output_file, index=False)
+    # sort all sheets
+    for name, df in sheets.items():
+        if "Tm" in df.columns:
+            sheets[name] = df.sort_values(by=["Tm", "Player"])
+
+    # write back
+    with pd.ExcelWriter(file_path, engine="openpyxl", mode="w") as writer:
+        for name, df in sheets.items():
+            df.to_excel(writer, sheet_name=name, index=False)
+
+    print(f"Updated {filename}")
