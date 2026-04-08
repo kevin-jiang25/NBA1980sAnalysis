@@ -1,7 +1,9 @@
 import pandas as pd
 from pathlib import Path
 
-file_path = Path.home() / "Documents" / "NBA1980s" / "NBA 1980's Data" / "1980's_CleanedData" / "Cleansed_NBA_1988-1989.xlsx"
+file_path = Path.home() / "Code" / "NBA1980sAnalysis" / "NBA 1980's Data" / "1980's_CleanedData" / "Cleansed_NBA_1989-1990.xlsx"
+output_dir = Path(__file__).resolve().parent / "output"
+output_dir.mkdir(parents=True, exist_ok=True)
 
 totals_df = pd.read_excel(file_path, sheet_name="Totals")
 advanced_df = pd.read_excel(file_path, sheet_name="Advanced")
@@ -21,8 +23,8 @@ advanced_df = advanced_df[[col for col in advanced_keep if col in advanced_df.co
 
 df = totals_df.merge(advanced_df, on=["Player", "Tm", "Season"], how="left")
 
-print(df.columns)
-print(df.head())
+pd.DataFrame({"column_name": df.columns}).to_csv(output_dir / "merged_columns.csv", index=False)
+df.head().to_csv(output_dir / "merged_head.csv", index=False)
 def zscore_by_season(df, col):
     return df.groupby("Season")[col].transform(
         lambda x: ((x - x.mean()) / x.std(ddof=0)) if x.std(ddof=0) != 0 else 0
@@ -84,14 +86,24 @@ df["advanced_rank_avg"] = (
 
 df["burden_gap"] = df["advanced_rank_avg"] - df["dependence_rank"]
 
-print(
+#write to csv output --> graph?
+top_custom_impact_df = (
     df[["Player", "Tm", "Season", "custom_impact_v1", "dependence_score", "dependence_rank", "advanced_rank_avg", "burden_gap"]]
     .sort_values("custom_impact_v1", ascending=False)
     .head(20)
 )
+top_custom_impact_df.to_csv(output_dir / "top_custom_impact.csv", index=False)
 
-print(
+top_burden_gap_df = (
     df[["Player", "Tm", "Season", "dependence_score", "dependence_rank", "burden_gap"]]
     .sort_values("burden_gap", ascending=False)
     .head(20)
 )
+top_burden_gap_df.to_csv(output_dir / "top_burden_gap.csv", index=False)
+
+
+df["custom_impact_rank"] = df.groupby("Season")["custom_impact_v1"].rank(
+    ascending=False,
+    method="min"
+)
+# 

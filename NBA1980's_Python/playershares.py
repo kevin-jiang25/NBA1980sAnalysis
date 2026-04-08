@@ -12,10 +12,6 @@ def add_team_centrality(df, team_col="Tm", stats=None, keep_team_totals=False):
     """
     df_out = df_out[df_out[team_col] != "TOT"]
 
-    cols_to_remove = ["ORB_share", "DRB_share", "ORB_team", "DRB_team"]
-
-    df_out.drop(columns=[col for col in cols_to_remove if col in df_out.columns], inplace=True)
-
     for stat in stats:
         team_total_col = f"{stat}_team"
         share_col = f"{stat}_share"
@@ -27,24 +23,9 @@ def add_team_centrality(df, team_col="Tm", stats=None, keep_team_totals=False):
     Removes the Team Total PTS/AST/ORB/DRB/STL/BLK/MP from the df. Can set the flag to True
     in function declaration if needed. 
     
-    (Logic behind MP might be a little sketch)
     """
     if not keep_team_totals:
         df_out.drop(columns=[f"{stat}_team" for stat in stats], inplace=True)
-
-    cols = list(df_out.columns)
-
-    # remove TRB_share from current position
-    cols.remove("TRB_share")
-
-    # find where AST_share is
-    ast_index = cols.index("AST_share")
-
-    # insert TRB_share right after AST_share
-    cols.insert(ast_index + 1, "TRB_share")
-
-    # reassign column order
-    df_out = df_out[cols]
 
     return df_out
 
