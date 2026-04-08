@@ -1,127 +1,123 @@
+from pathlib import Path
+
 import pandas as pd
-import os
 
-def add_team_centrality(df, team_col="Tm", stats=None, keep_team_totals=False):
-    df_out = df.copy()
+DATA_DIRECTORY = Path("NBA 1980's Data/1980's_CleanedData")
+DEFAULT_STATS = ["PTS", "AST", "TRB", "STL", "BLK", "TOV", "MP"]
+SHARE_COLUMNS = [
+    "PTS_share",
+    "AST_share",
+    "TRB_share",
+    "STL_share",
+    "BLK_share",
+    "TOV_share",
+    "MP_share",
+]
 
-    if stats is None:
-        stats = ["PTS", "AST", "TRB", "STL", "BLK", "TOV", "MP"]
-    """
-    If a player's team is "TOT" the column is ignored. "TOT" is when a player is on multiple teams. Their combined
-    stats are listed. Not needed for our work.
-    """
-    df_out = df_out[df_out[team_col] != "TOT"]
+
+def iter_cleansed_excel_files(data_directory: Path):
+    for file_path in sorted(data_directory.iterdir()):
+        filename = file_path.name
+        if (
+            filename.startswith("~$")
+            or not filename.startswith("Cleansed_NBA_")
+            or file_path.suffix != ".xlsx"
+            or "with_centrality" in filename
+        ):
+            continue
+        yield file_path
+
+
+def add_team_centrality(
+    df: pd.DataFrame,
+    team_col: str = "Tm",
+    stats: list[str] | None = None,
+    keep_team_totals: bool = False,
+) -> pd.DataFrame:
+    result = df.copy()
+    stats = stats or DEFAULT_STATS
+
+    # "TOT" rows combine multi-team seasons; we exclude them for team-share math.
+    result = result[result[team_col] != "TOT"]
 
     for stat in stats:
         team_total_col = f"{stat}_team"
         share_col = f"{stat}_share"
+        result[team_total_col] = result.groupby(team_col)[stat].transform("sum")
+        result[share_col] = (result[stat] / result[team_total_col]).round(3)
 
-        df_out[team_total_col] = df_out.groupby(team_col)[stat].transform("sum")
-        df_out[share_col] = (df_out[stat] / df_out[team_total_col]).round(3)
-
-    """
-    Removes the Team Total PTS/AST/ORB/DRB/STL/BLK/MP from the df. Can set the flag to True
-    in function declaration if needed. 
-    
-    """
     if not keep_team_totals:
-        df_out.drop(columns=[f"{stat}_team" for stat in stats], inplace=True)
+        result = result.drop(columns=[f"{stat}_team" for stat in stats])
 
-    return df_out
+    return result
 
-data_directory = "NBA 1980's Data/1980's_CleanedData"
 
-"""
-Replaces the "Totals" in sheets with the updated info (shares) and writes to the xlsx files
-"""
-
-for file in os.listdir(data_directory):
-    if (
-        file.startswith("~$")
-        or not file.startswith("Cleansed_NBA_")
-        or not file.endswith(".xlsx")
-        or "with_centrality" in file
-    ):
-        continue
-
-    file_path = os.path.join(data_directory, file)
-    print(f"Processing {file}")
-
+def update_totals_sheet(file_path: Path) -> None:
     sheets = pd.read_excel(file_path, sheet_name=None)
-
     sheets["Totals"] = add_team_centrality(sheets["Totals"])
 
-    for name, df in sheets.items():
-        if "Tm" in df.columns:
-            sheets[name] = df.sort_values(by=["Tm", "Player"])
+    for sheet_name, sheet_df in sheets.items():
+        if "Tm" in sheet_df.columns:
+            sheets[sheet_name] = sheet_df.sort_values(by=["Tm", "Player"])
 
     with pd.ExcelWriter(file_path, engine="openpyxl", mode="w") as writer:
-        for name, df in sheets.items():
-            df.to_excel(writer, sheet_name=name, index=False)
+        for sheet_name, sheet_df in sheets.items():
+            sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    print(f"Updated {file}")
 
-"""
-Validates the changes.
-1. Checks for 'TOT' rows
-2. Checks if the new 'shares' columns add up to 1 for each team
-3. Checks for empty cells
-"""
-
-def validate_centrality(df, filename):
+def validate_centrality(df: pd.DataFrame, filename: str) -> bool:
     print(f"\nValidating {filename}...")
-
-    issues = False
+    issues_found = False
 
     if "TOT" in df["Tm"].values:
         print("Found 'TOT' rows")
-        issues = True
+        issues_found = True
 
-    share_cols = ["PTS_share", "AST_share", "TRB_share", "STL_share", "BLK_share","TOV_share", "MP_share"]
-
-    for col in share_cols:
+    for col in SHARE_COLUMNS:
         if col not in df.columns:
             print(f"Missing column: {col}")
-            issues = True
+            issues_found = True
             continue
 
         sums = df.groupby("Tm")[col].sum()
-
-        bad = sums[(sums < 0.99) | (sums > 1.01)]
-
-        if not bad.empty:
+        bad_sums = sums[(sums < 0.99) | (sums > 1.01)]
+        if not bad_sums.empty:
             print(f"{col} does not sum to ~1 for teams:")
-            print(bad.head())
-            issues = True
+            print(bad_sums.head())
+            issues_found = True
 
-    for col in share_cols:
-        if col in df.columns:
-            if not df[(df[col] < 0) | (df[col] > 1)].empty:
-                print(f"Invalid values in {col}")
-                issues = True
+    for col in SHARE_COLUMNS:
+        if col in df.columns and not df[(df[col] < 0) | (df[col] > 1)].empty:
+            print(f"Invalid values in {col}")
+            issues_found = True
 
-    if df[share_cols].isna().sum().sum() > 0:
+    if df[SHARE_COLUMNS].isna().sum().sum() > 0:
         print("Found NaNs in share columns")
-        issues = True
+        issues_found = True
 
-    if not issues:
+    if not issues_found:
         print("Passed all checks!")
 
-    return not issues
+    return not issues_found
 
-for filename in os.listdir(data_directory):
-    if (
-        filename.startswith("~$")
-        or not filename.startswith("Cleansed_NBA_")
-        or not filename.endswith(".xlsx")
-        or "with_centrality" in filename
-    ):
-        continue
 
-    file_path = os.path.join(data_directory, filename)
+def process_all_files(data_directory: Path) -> None:
+    for file_path in iter_cleansed_excel_files(data_directory):
+        print(f"Processing {file_path.name}")
+        update_totals_sheet(file_path)
+        print(f"Updated {file_path.name}")
 
-    sheets = pd.read_excel(file_path, sheet_name=None)
 
-    df = sheets["Totals"]
+def validate_all_files(data_directory: Path) -> None:
+    for file_path in iter_cleansed_excel_files(data_directory):
+        sheets = pd.read_excel(file_path, sheet_name=None)
+        validate_centrality(sheets["Totals"], file_path.name)
 
-    validate_centrality(df, filename)
+
+def main() -> None:
+    process_all_files(DATA_DIRECTORY)
+    validate_all_files(DATA_DIRECTORY)
+
+
+if __name__ == "__main__":
+    main()
