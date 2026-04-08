@@ -31,25 +31,76 @@ def add_team_centrality(df, team_col="Tm", stats=None, keep_team_totals=False):
 
     return df_out
 
-# data_directory = "NBA 1980's Data/1980's_CleanedData"
+data_directory = "NBA 1980's Data/1980's_CleanedData"
 
 # for file in os.listdir(data_directory):
-#     if file.startswith("~$"):
-#         continue
-#     if not file.startswith("Cleansed_NBA_") or not file.endswith(".xlsx"):
+#     if (file.startswith("Cleansed_NBA_")
+#         and file.endswith(".xlsx")
+#         and not file.startswith("~$")
+#         and "with_centrality" not in file):
 #         continue
 
 #     file_path = os.path.join(data_directory, file)
 #     print(f"Processing {file}")
 
-#     df = pd.read_excel(file_path, sheet_name="Totals")
+#     sheets = pd.read_excel(file_path, sheet_name=None)
 
-#     df_out = add_team_centrality(df)
+#     sheets["Totals"] = add_team_centrality(sheets["Totals"])
 
-#     output_file = os.path.join(data_directory, f"{file.split(".xlsx")[0]}_with_centrality.xlsx")
-#     df_out.to_excel(output_file, index=False)
+#     for name, df in sheets.items():
+#         if "Tm" in df.columns:
+#             sheets[name] = df.sort_values(by=["Tm", "Player"])
 
-data_dir = "NBA 1980's Data/1980's_CleanedData"
+#     with pd.ExcelWriter(file_path, engine="openpyxl", mode="w") as writer:
+#         for name, df in sheets.items():
+#             df.to_excel(writer, sheet_name=name, index=False)
+
+#     print(f"Updated {file}")
+
+def validate_centrality(df, filename):
+    print(f"\nValidating {filename}...")
+
+    issues = False
+
+    # 1. Check TOT rows
+    if "TOT" in df["Tm"].values:
+        print("❌ Found 'TOT' rows")
+        issues = True
+
+    # 2. Check share sums
+    share_cols = ["PTS_share", "AST_share", "ORB_share", "DRB_share", "STL_share", "BLK_share", "MP_share"]
+
+    for col in share_cols:
+        if col not in df.columns:
+            print(f"⚠️ Missing column: {col}")
+            issues = True
+            continue
+
+        sums = df.groupby("Tm")[col].sum()
+
+        bad = sums[(sums < 0.99) | (sums > 1.01)]
+
+        if not bad.empty:
+            print(f"❌ {col} does not sum to ~1 for teams:")
+            print(bad.head())
+            issues = True
+
+    # 3. Check invalid values
+    for col in share_cols:
+        if col in df.columns:
+            if not df[(df[col] < 0) | (df[col] > 1)].empty:
+                print(f"❌ Invalid values in {col}")
+                issues = True
+
+    # 4. Check NaNs
+    if df[share_cols].isna().sum().sum() > 0:
+        print("❌ Found NaNs in share columns")
+        issues = True
+
+    if not issues:
+        print("✅ Passed all checks")
+
+    return not issues
 
 for filename in os.listdir(data_dir):
     if (
@@ -60,22 +111,10 @@ for filename in os.listdir(data_dir):
     ):
         continue
 
-    file_path = os.path.join(data_dir, filename)
-    print(f"Processing {filename}")
+    file_path = os.path.join(data_directory, filename)
 
     sheets = pd.read_excel(file_path, sheet_name=None)
 
-    # update totals
-    sheets["Totals"] = add_team_centrality(sheets["Totals"])
+    df = sheets["Totals"]
 
-    # sort all sheets
-    for name, df in sheets.items():
-        if "Tm" in df.columns:
-            sheets[name] = df.sort_values(by=["Tm", "Player"])
-
-    # write back
-    with pd.ExcelWriter(file_path, engine="openpyxl", mode="w") as writer:
-        for name, df in sheets.items():
-            df.to_excel(writer, sheet_name=name, index=False)
-
-    print(f"Updated {filename}")
+    validate_centrality(df, filename)
