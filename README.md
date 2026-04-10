@@ -3,7 +3,7 @@
 ## Overview
 This project analyzes NBA Player impact in the 1980s by combining traditional advanced metrics with a new concept: **team centrality** - how much a player contributes to their team's total production.
 
-We built a custom metric **Custom Impact Index** and compare it against standard advanced stats to identify players who may be undervalued or overburdened relative to traditional rankings.
+We built a custom metric, **Custom Impact Index v1** and compare it against standard advanced stats to identify players who may be undervalued or carry a larger role relative to traditional rankings.
 
 ## Project Question
 Can team centrality and role burden reveal dimensions of player impact in the 1980s NBA that traditional box-score and advanced metrics do not fully capture?
@@ -11,11 +11,11 @@ Can team centrality and role burden reveal dimensions of player impact in the 19
 ## Key Idea
 Player impact is not just about efficiency or quality - it is also about how central a player is to their team's production.
 
-We aim to separate:
+We separate:
 
--**How good a player is**
+- **How good a player is**
 
--**How much their team depends on them**
+- **How much their team depends on them**
 
 ## Hypothesis
 Including team dependence and durability-related proxies should elevate some players relative to standard advanced-stat rankings.
@@ -29,7 +29,7 @@ Box-score contributions:
 
 ### 2. Efficiency
 Advanced Metrics:
-- TS%, PER, WD/48
+- TS%, PER, WS/48
 
 ### 3. Team Centrality
 Player share of team totals:
@@ -57,7 +57,7 @@ Team Dependence
 
 ## Burden Gap Analysis
 
-We compare our metric to traditiional advanced stats:
+We compare our metric to traditional advanced stats:
 - Advanced Rank Avg = average(rank(PER), rank(BPM), rank(WS))
 - Dependence Rank = rank based on team centrality
 
@@ -103,4 +103,4 @@ It does not capture:
 - Screening and off-ball movement
 - Leadership and team dynamics
 
-As a result, the analysis refelcts **measurable impact**, not total player impact. While we can somewhat measure impact beyond what is traditinally measured, we can't look at things that can't be quantified.
+As a result, the analysis reflects **measurable impact**, not total player impact. While we can somewhat measure impact beyond what is traditionally measured, we can't look at things that can't be quantified.
