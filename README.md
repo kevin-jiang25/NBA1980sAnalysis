@@ -1,63 +1,72 @@
 # NBA1980sAnalysis
 
+## Overview
+This project analyzes NBA Player impact in the 1980s by combining traditional advanced metrics with a new concept: **team centrality** - how much a player contributes to their team's total production.
+
+We built a custom metric **Custom Impact Index** and compare it against standard advanced stats to identify players who may be undervalued or overburdened relative to traditional rankings.
+
 ## Project Question
 Can team centrality and role burden reveal dimensions of player impact in the 1980s NBA that traditional box-score and advanced metrics do not fully capture?
 
-## Main Framing
-This is a measured-impact project, not a true-impact project.
+## Key Idea
+Player impact is not just about efficiency or quality - it is also about how central a player is to their team's production.
 
-It asks:
-Which players appear more central to their teams' measurable production and burden than traditional advanced metrics alone would suggest?
+We aim to separate:
 
-This framing intentionally avoids claiming we can directly measure hidden factors like leadership, screening, defensive communication, gravity, or locker-room impact from this dataset alone.
+-**How good a player is**
+
+-**How much their team depends on them**
 
 ## Hypothesis
 Including team dependence and durability-related proxies should elevate some players relative to standard advanced-stat rankings.
 
-## Core Framework
-Impact is modeled as two broad dimensions:
+## Methodology
+We model player impact using three components:
 
-1. Statistical Quality
-- PER
-- BPM
-- WS
-- TS%
-- WS/48
+### 1. Production
+Box-score contributions:
+- Points, total rebounds, assists, steals, blocks, turnovers
 
-2. Team Centrality
+### 2. Efficiency
+Advanced Metrics:
+- TS%, PER, WD/48
+
+### 3. Team Centrality
+Player share of team totals:
 - Points share
 - Assists share
 - Rebounds share
 - Minutes share
-- Usage and durability (planned extensions)
 
-Key idea:
-Impact is not only quality, it is also centrality.
+### Custom Impact Index v1
+Our current implementation of the Custom Impact v1 combines these components:
 
-## Version 1 Index (Current)
-The current implementation in `NBA1980's_Python/standardize_components.py` builds a **Custom Impact Index v1** from 3 components:
+0.4 * Production + 0.3 * Efficiency + 0.3 * Team Centrality
 
-1. Production
+Production
 - `z(PTS) + z(TRB) + z(AST) + 0.5*z(STL) + 0.5*z(BLK) - 0.5*z(TOV)`
 
-2. Efficiency
+Efficiency
 - `z(TS%) + z(PER) + z(WS/48)`
 
-3. Team Dependence (implemented)
+Team Dependence
 - `z(PTS_share) + z(TRB_share) + z(AST_share) + z(MP_share)`
 
-Index combination (implemented):
-- `Custom Impact v1 = 0.4*z(Production) + 0.3*z(Efficiency) + 0.3*z(Dependence)`
 
-Comparison baseline:
-- `Advanced Rank Avg = average(rank(PER), rank(BPM), rank(WS))`
+(All components are standardized using z-scores.)
 
-Role-burden lens:
-- `Dependence Rank = rank(Dependence Score, descending by season)`
-- `Burden Gap = Advanced Rank Avg - Dependence Rank`
+## Burden Gap Analysis
+
+We compare our metric to traditiional advanced stats:
+- Advanced Rank Avg = average(rank(PER), rank(BPM), rank(WS))
+- Dependence Rank = rank based on team centrality
+
+### Burden Gap
+- Burden Gap = Advanced Rank Avg - Dependence Rank
 
 Interpretation:
 - Larger positive burden gap suggests a player appears more relied upon than their advanced-rank average alone would indicate.
+- Lower/negative burden gap suggest a player is efficient, but less central to team production.
 
 ## Current Output Files
 The analysis writes these CSVs to `NBA1980's_Python/output/`:
@@ -67,7 +76,7 @@ The analysis writes these CSVs to `NBA1980's_Python/output/`:
 - `top_custom_impact.csv`
 - `top_burden_gap.csv`
 
-## Snapshot From Current Outputs (1989-1990)
+## Key Findings From Current Outputs (1989-1990)
 Based on `top_custom_impact.csv`, the top Custom Impact v1 players include:
 - Michael Jordan
 - Hakeem Olajuwon
@@ -82,20 +91,16 @@ Based on `top_burden_gap.csv`, the highest burden-gap players include:
 - Jeff Turner
 - Kevin Edwards
 
-This supports the project direction: high centrality/burden signals can surface players differently than quality-only advanced rankings.
+### Interpretation
+Our results show that traditional stars remain dominant under the combined metric. However, role and burden metrics surface additional players who appear to be highly relied on by their teams, but aren't as highly ranked by advanced stats alone.
 
-## Hidden Impact and Limits
-This dataset can capture player impact well in:
-- Bucket A: impact clearly visible in box stats
-- Bucket B: impact partly visible in advanced stats
 
-It is weaker for:
-- Bucket C: impact only weakly visible in these features (screening, off-ball gravity, matchup deterrence, leadership effects)
+## Limitations
+This project is limited to box-score and derived statistics.
 
-These should be discussed as likely missing components, not claimed as measured.
+It does not capture:
+- Defensive positioning and communication
+- Screening and off-ball movement
+- Leadership and team dynamics
 
-## Next Steps
-1. Expand Team Dependence with additional share terms from your drafted formula (e.g., STL/BLK/TOV-share effects if desired).
-2. Add durability and trust proxies directly into the index (`G`, total minutes, team minute share weighting).
-3. Add role-efficiency tests (low usage with high TS%/WS48) for low-volume high-value players.
-4. Run this pipeline across all seasons in the 1980s and compare stability of burden-gap findings year over year.
+As a result, the analysis refelcts **measurable impact**, not total player impact. While we can somewhat measure impact beyond what is traditinally measured, we can't look at things that can't be quantified.
